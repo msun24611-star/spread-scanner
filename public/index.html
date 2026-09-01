@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>📐 垂直价差机会发现</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      max-width: 1040px; margin: 0 auto; padding: 22px 20px 60px; color: #1a1a1a; line-height: 1.55; background: #fafafa; }
+    h1 { font-size: 22px; margin-bottom: 2px; }
+    .sub { color: #666; font-size: 13px; margin-bottom: 16px; }
+    a { color: #2563eb; text-decoration: none; }
+    .banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
+    .banner.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .banner.bad { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    input, select, button { padding: 8px 13px; font-size: 14px; border: 1px solid #ccc; border-radius: 8px; background: #fff; }
+    button { cursor: pointer; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .filters { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 16px;
+      font-size: 13px; color: #444; background: #fff; border: 1px solid #eee; border-radius: 10px; padding: 10px 14px; }
+    .filters label { display: flex; gap: 5px; align-items: center; }
+    .filters input { width: 62px; padding: 5px 8px; }
+    #stat { font-size: 13px; color: #888; margin-bottom: 10px; }
+    .empty { color: #888; padding: 40px 0; text-align: center; }
+
+    .group { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; background: #fff; }
+    .grouphead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .tkr { font-size: 18px; font-weight: 700; }
+    .px { color: #666; font-size: 13px; }
+    .sidechip { font-size: 11px; padding: 2px 8px; border-radius: 999px; color: #fff; font-weight: 600; }
+    .bull { background: #16a34a; }
+    .bear { background: #dc2626; }
+    .earn { background: #f59e0b; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+    table.opps { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    table.opps th, table.opps td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+    table.opps th { color: #888; font-weight: 600; font-size: 11.5px; }
+    table.opps td:first-child, table.opps th:first-child { text-align: left; }
+    table.opps td b, table.opps td.num { font-variant-numeric: tabular-nums; }
+    table.opps tr:last-child td { border-bottom: none; }
+    .score-cell { color: #2563eb; font-weight: 800; }
+    .footer { margin-top: 36px; font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 12px; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>📐 垂直价差机会发现</h1>
+  <div class="sub">实时扫描期权链,筛选并排序<b>信用价差</b>(Bull Put / Bear Call)机会 · 卖方 · 综合评分 ·
+    <a href="/tech.html">🚀 七大科技股高频到期 →</a></div>
+
+  <div id="banner" class="banner" style="display:none"></div>
+
+  <div class="controls">
+    <button id="btnAll" class="primary">🔍 扫描全池</button>
+    <input id="ticker" placeholder="或输入单个代码,如 NVDA" style="width:200px" />
+    <button id="btnOne">拉这只</button>
+    <span id="stat"></span>
+  </div>
+
+  <div class="filters">
+    <label>方向
+      <select id="fSide">
+        <option value="">全部</option>
+        <option value="bull_put">Bull Put(看多)</option>
+        <option value="bear_call">Bear Call(看空)</option>
+      </select>
+    </label>
+    <label>DTE <input id="fMinDte" type="number" value="1" /> – <input id="fMaxDte" type="number" value="7" /></label>
+    <label>最小RoR% <input id="fRor" type="number" value="15" /></label>
+    <label>最小POP% <input id="fPop" type="number" value="60" /></label>
+    <label>排序
+      <select id="fSort">
+        <option value="score">综合评分</option>
+        <option value="ror">回报风险比</option>
+        <option value="pop">胜率POP</option>
+        <option value="short_iv">IV</option>
+      </select>
+    </label>
+    <label title="持仓期内撞财报的价差,波动风险大"><input id="fHideEarn" type="checkbox" /> 隐藏撞财报</label>
+  </div>
+
+  <div id="content"></div>
+
+  <div class="footer">
+    个人研究工具 · 数据来自老虎 Open API,是否实时取决于行情权限 · 期权价差有亏损风险 ·
+    <b>本页仅供研究,不构成投资建议,不代客下单</b>。
+  </div>
+
+  <script>
+    let ROWS = [];
+    const esc = (s) => String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const pct = (v) => v == null ? "—" : (v * 100).toFixed(0) + "%";
+    const money = (v) => v == null ? "—" : "$" + Number(v).toFixed(2);
+
+    async function checkStatus() {
+      try {
+        const s = await (await fetch("/api/status")).json();
+        const b = document.getElementById("banner");
+        b.style.display = "block";
+        if (s.us_option_ok) {
+          b.className = "banner ok";
+          b.innerHTML = "✅ 美股期权行情已开通 (usOptionQuote),数据可用。";
+        } else {
+          b.className = "banner bad";
+          b.innerHTML = "⚠️ 当前账户<b>没有美股期权行情权限</b>,扫描会失败。" +
+            "去 Tiger Trade App → 我的 → 行情权限 → OpenAPI权限 购买 <code>usStockQuote</code> + <code>usOptionQuote</code>。" +
+            "<br>当前权限:" + esc(JSON.stringify((s.permissions || []).map(p => p.name)));
+        }
+      } catch (e) { /* 忽略 */ }
+    }
+
+    function buildQuery() {
+      const q = new URLSearchParams();
+      q.set("min_dte", document.getElementById("fMinDte").value || 1);
+      q.set("max_dte", document.getElementById("fMaxDte").value || 7);
+      q.set("min_ror", (Number(document.getElementById("fRor").value || 15) / 100).toFixed(4));
+      q.set("min_pop", (Number(document.getElementById("fPop").value || 60) / 100).toFixed(4));
+      return q;
+    }
+
+    async function scan(ticker) {
+      const stat = document.getElementById("stat");
+      const btnAll = document.getElementById("btnAll"), btnOne = document.getElementById("btnOne");
+      btnAll.disabled = btnOne.disabled = true;
+      const q = buildQuery();
+      if (ticker) q.set("ticker", ticker);
+      stat.textContent = ticker ? `⏳ 正在拉 ${ticker} 的期权链并计算…` : "⏳ 正在扫描全池,约 10–60 秒…";
+      document.getElementById("content").innerHTML = "";
+      try {
+        const data = await (await fetch("/api/scan?" + q.toString())).json();
+        ROWS = data.spreads || [];
+        const errs = (data.errors || []).length ? ` · ${data.errors.length} 个标的出错` : "";
+        stat.textContent = `${data.count || 0} 条机会 · asOf ${data.asOf || "—"}` +
+          (data.cached ? " · 缓存" : (data.elapsed != null ? ` · 用时${data.elapsed}s` : "")) + errs;
+        render();
+      } catch (e) {
+        stat.textContent = "请求失败:" + e.message;
+      } finally {
+        btnAll.disabled = btnOne.disabled = false;
+      }
+    }
+
+    const MAX_PER_SYMBOL = 3;
+    const CONTRACT_MULT = 100; // 期权合约乘数:1张=100股
+
+    function render() {
+      const side = document.getElementById("fSide").value;
+      const sortKey = document.getElementById("fSort").value;
+      let rows = ROWS.slice();
+      if (side) rows = rows.filter(r => r.side === side);
+      if (document.getElementById("fHideEarn").checked) rows = rows.filter(r => !r.earnings_in_window);
+      rows.sort((a, b) => (b[sortKey] ?? -Infinity) - (a[sortKey] ?? -Infinity));
+
+      const el = document.getElementById("content");
+      if (!rows.length) { el.innerHTML = '<div class="empty">没有符合条件的价差。放宽过滤条件,或先确认已开通美股期权行情。</div>'; return; }
+
+      // 按标的分组,组内保持当前排序,每组最多取前 N 条
+      const groups = new Map();
+      for (const r of rows) {
+        if (!groups.has(r.symbol)) groups.set(r.symbol, []);
+        const g = groups.get(r.symbol);
+        if (g.length < MAX_PER_SYMBOL) g.push(r);
+      }
+      // 组的顺序:按组内最优一条(第一条,即已排序后的最佳)排列
+      const symbols = [...groups.keys()].sort((a, b) => {
+        const ra = groups.get(a)[0], rb = groups.get(b)[0];
+        return (rb[sortKey] ?? -Infinity) - (ra[sortKey] ?? -Infinity);
+      });
+
+      el.innerHTML = symbols.map(sym => {
+        const g = groups.get(sym);
+        const head = g[0];
+        const earnBadge = g.some(r => r.earnings_in_window)
+          ? `<span class="earn" title="持仓期内有财报,波动风险大">⚠️财报 ${esc(head.earnings_date)}${head.earnings_time ? " " + esc(head.earnings_time) : ""}</span>` : "";
+        const bodyRows = g.map(r => {
+          const isBull = r.side === "bull_put";
+          const legTxt = isBull
+            ? `卖${r.short_strike}/买${r.long_strike} Put`
+            : `卖${r.short_strike}/买${r.long_strike} Call`;
+          const margin = r.max_loss * CONTRACT_MULT;   // 保证金(美元):最大亏损 × 100
+          const profit = r.credit * CONTRACT_MULT;     // 收益(美元):净收 × 100
+          const marginRor = r.ror;                      // 保证金收益率 = 净收/保证金,与乘数无关
+          const annualized = r.dte > 0 ? marginRor * (365 / r.dte) : null; // 年化收益(单利)
+          return `
+            <tr>
+              <td><span class="sidechip ${isBull ? "bull" : "bear"}">${isBull ? "Bull Put" : "Bear Call"}</span></td>
+              <td>${esc(r.expiry)}</td>
+              <td>${legTxt}</td>
+              <td class="num">${money(margin)}</td>
+              <td class="num">${money(profit)}</td>
+              <td class="num"><b>${pct(marginRor)}</b></td>
+              <td class="num">${r.dte}</td>
+              <td class="num"><b>${pct(annualized)}</b></td>
+              <td class="num">${r.pop == null ? "—" : pct(r.pop)}</td>
+              <td class="num score-cell">${r.score ?? "—"}</td>
+            </tr>`;
+        }).join("");
+        return `
+          <div class="group">
+            <div class="grouphead">
+              <span class="tkr">${esc(sym)}</span>
+              <span class="px">${money(head.price)}</span>
+              ${earnBadge}
+            </div>
+            <table class="opps">
+              <thead><tr>
+                <th>策略</th><th>到期</th><th>结构</th><th>保证金(美元)</th><th>收益(美元)</th>
+                <th>保证金收益率</th><th>持仓时间(日)</th><th>保证金年化收益(单利)</th><th>POP</th><th>评分</th>
+              </tr></thead>
+              <tbody>${bodyRows}</tbody>
+            </table>
+          </div>`;
+      }).join("");
+    }
+
+    document.getElementById("btnAll").addEventListener("click", () => scan(""));
+    document.getElementById("btnOne").addEventListener("click", () => {
+      const t = document.getElementById("ticker").value.trim().toUpperCase();
+      if (t) scan(t);
+    });
+    document.getElementById("ticker").addEventListener("keydown", e => {
+      if (e.key === "Enter") document.getElementById("btnOne").click();
+    });
+    ["fSide", "fSort", "fHideEarn"].forEach(id => document.getElementById(id).addEventListener("change", render));
+
+    checkStatus();
+    // 支持 /?ticker=NVDA 从科技股页跳进来自动扫
+    const qp = new URLSearchParams(location.search).get("ticker");
+    if (qp) { document.getElementById("ticker").value = qp.toUpperCase(); scan(qp.toUpperCase()); }
+  </script>
+</body>
+</html>

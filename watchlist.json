@@ -1,0 +1,10 @@
+{
+  "_comment": "精选高流动性美股期权池。改这里即可增删标的。分组只是给你自己看,程序把所有 symbol 合并扫描。",
+  "groups": {
+    "指数ETF": ["SPY", "QQQ", "IWM", "DIA"],
+    "科技龙头": ["AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "META", "AMZN", "TSLA", "AVGO", "NFLX"],
+    "半导体": ["SMCI", "MU", "INTC", "TSM", "ARM"],
+    "热门波动": ["PLTR", "COIN", "MSTR", "SOFI", "MARA"],
+    "传统蓝筹": ["JPM", "BAC", "XOM", "WMT", "DIS", "BA"]
+  }
+}

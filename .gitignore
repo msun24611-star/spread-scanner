@@ -1,0 +1,26 @@
+# === 敏感文件,绝不上传 ===
+# cookie 签名密钥
+.secret_key
+# 外网访问密码
+access_password.txt
+# 本地环境变量(含 TIGER_ID / 账号 / 私钥路径)
+.env
+# 私钥(以防万一)
+*.pem
+
+# === 本地/运行时产物 ===
+.venv/
+__pycache__/
+*.pyc
+# server.log / tunnel.log
+*.log
+# 扫描结果输出快照
+scan.json
+# 54MB 大文件,用户各自去官网下
+cloudflared.exe
+
+# === 编辑器/工具本地配置 ===
+# 含调试用的密码与临时隧道网址
+.claude/settings.local.json
+.vscode/
+.idea/
