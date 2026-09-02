@@ -187,8 +187,10 @@
             ${share == null ? "" : `<span class="split" title="Call 占名义金额 ${pct(share)}"><i style="width:${(share * 100).toFixed(0)}%"></i></span>`}
             <span class="tot">${g.count} 条命中 · 合计 ${money(g.total_notional)}</span>
             <button class="dirbtn" onclick="analyzeDir('${esc(g.symbol)}', this)">判方向</button>
+            <button class="dirbtn" onclick="analyzePos('${esc(g.symbol)}', this)" title="用持仓结构判势,盘前也能用">📊 持仓判势</button>
           </div>
           <div class="dirbox" id="dir-${esc(g.symbol)}" style="display:none"></div>
+          <div class="dirbox" id="pos-${esc(g.symbol)}" style="display:none"></div>
           <table>
             <thead><tr>
               <th>合约</th><th>到期</th><th>价外幅度</th><th>成交量</th><th>未平仓</th>
@@ -236,6 +238,57 @@
           ${rows || '<div class="muted">没有可判方向的合约。</div>'}
           <div class="cover" style="margin-top:8px">
             方法:逐笔用 tick rule 推主动买/卖,再按「买call或卖put=看涨」归类。是推断不是交易所方向标志,覆盖率低时仅供参考。
+          </div>
+        </div>`;
+        box.dataset.loaded = "1";
+        btn.textContent = "收起";
+      } catch (e) {
+        box.innerHTML = `<div class="inner err">分析失败:${esc(e.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // 点「持仓判势」:用整条链的持仓结构判势(盘前可用)
+    const POS_VMAP = { "偏看多": "v-bull", "偏看空": "v-bear", "多空分歧": "v-mix", "中性": "v-none" };
+    window.analyzePos = async function analyzePos(symbol, btn) {
+      const box = document.getElementById("pos-" + symbol);
+      if (!box) return;
+      if (box.style.display !== "none" && box.dataset.loaded === "1") {
+        box.style.display = "none"; box.dataset.loaded = "0"; btn.textContent = "📊 持仓判势"; return;
+      }
+      box.style.display = "block";
+      box.innerHTML = '<div class="inner muted">⏳ 读取期权链持仓结构…</div>';
+      btn.disabled = true; btn.textContent = "分析中…";
+      try {
+        const d = await (await fetch("/api/positioning?ticker=" + encodeURIComponent(symbol))).json();
+        if (d.error) { box.innerHTML = `<div class="inner err">${esc(d.error)}</div>`; return; }
+        const s = d.signals, vClass = POS_VMAP[d.verdict] || "v-none";
+        const gapTxt = s.max_pain_gap == null ? "" :
+          `(现价${s.max_pain_gap >= 0 ? "下方" : "上方"} ${Math.abs(s.max_pain_gap * 100).toFixed(1)}%)`;
+        const skewTxt = s.skew == null ? "—" :
+          (s.skew > 0 ? `+${(s.skew * 100).toFixed(1)}pt(put更贵·偏防御)`
+                      : `${(s.skew * 100).toFixed(1)}pt(call更贵·偏进攻)`);
+        const votes = (d.votes || []).map(v => {
+          const cls = v.score > 0 ? "b-bull" : (v.score < 0 ? "b-bear" : "b-neu");
+          const tag = v.score > 0 ? "偏多" : (v.score < 0 ? "偏空" : "中性");
+          return `<span class="${cls}" style="margin-right:12px">${esc(v.name)}:${tag} <span class="why">(${esc(v.note)})</span></span>`;
+        }).join("");
+        box.innerHTML = `<div class="inner">
+          <div style="margin-bottom:8px">
+            <span class="verdict ${vClass}">${esc(d.verdict)}</span>
+            <span class="cover">势能分 ${d.score > 0 ? "+" : ""}${d.score}(−100看空 ~ +100看多)</span>
+          </div>
+          <div class="dirrow"><span class="k">Put/Call 比</span>
+            <span class="why">OI口径 ${s.pcr_oi ?? "—"} · 成交口径 ${s.pcr_vol ?? "—"}(&gt;1.2偏空,&lt;0.7偏多)</span></div>
+          <div class="dirrow"><span class="k">Max Pain 磁吸位</span>
+            <span class="why">$${s.max_pain ?? "—"} ${gapTxt} · 临近到期股价常向此靠拢</span></div>
+          <div class="dirrow"><span class="k">支撑 / 阻力</span>
+            <span class="why">下方支撑 $${s.support ?? "—"}(putOI ${num(s.support_oi)}) · 上方阻力 $${s.resistance ?? "—"}(callOI ${num(s.resistance_oi)})</span></div>
+          <div class="dirrow"><span class="k">IV 偏斜</span><span class="why">${skewTxt}</span></div>
+          <div style="margin-top:8px">${votes}</div>
+          <div class="cover" style="margin-top:8px">
+            基于期权链持仓存量(OI/IV),反映"已建立的押注结构",非当日新单、也看不出买开卖开。盘前可用,粗描性质,仅供参考。
           </div>
         </div>`;
         box.dataset.loaded = "1";

@@ -314,3 +314,165 @@ def scan_all(symbols: list = None, params: dict = None):
                     "min_notional", "top_per_symbol", "max_expiries")},
         "total_hits": sum(g["count"] for g in groups),
     }
+
+
+# ---------------------------------------------------------------- 持仓判势(positioning)
+"""
+持仓判势 vs 逐笔判方向,是两码事:
+  逐笔判方向(direction_for): 看当日成交谁主动买/卖 —— 需要盘中逐笔数据,盘前拿不到。
+  持仓判势(positioning_for): 看整条期权链的**存量结构**(OI 分布 + IV 偏斜)—— 快照就有,盘前照样能算。
+
+四个信号,全部只依赖期权链快照:
+  1. Put/Call 比:put OI/成交 相对 call 的比。>1.2 偏空(避险/看跌盘重),<0.7 偏多。
+  2. Max Pain(最大痛苦点):到期时令期权买方总亏损最大的行权价 —— 也是期权卖方(做市商)
+     最舒服的价。临近到期股价常被"钉"向它。给出它相对现价在上还是在下。
+  3. OI 墓碑:call OI 最大的行权价视为上方阻力,put OI 最大的行权价视为下方支撑。
+  4. IV 偏斜(skew):同幅度价外 put 的 IV 减 call 的 IV。正偏斜(put 更贵)=市场为下跌
+     多付保险费,偏防御/看空;负偏斜=抢权利金追涨,偏进攻/看多。
+
+局限:OI 是存量,反映的是"已经建立的仓位",不含今天新变化;且看不出每笔是买开还是卖开。
+这是"市场整体押注结构"的粗描,不是精确多空信号。综合四项给一个 -100~+100 的势能分。
+"""
+
+POS_DEFAULTS = {
+    "max_expiries": 2,        # 看最近几个到期日(默认本周+下一档)
+    "max_dte": 14,            # 只看两周内到期(近端最能反映本周走势预期)
+    "skew_moneyness": 0.05,   # 取价外约 5% 的 put/call 比 IV 偏斜
+}
+
+
+def _nearest_by_moneyness(chain, S, right, target):
+    """在给定 right 里找 moneyness(strike/S-1)最接近 target 的一腿。"""
+    cand = [c for c in chain if c["right"] == right and c["strike"] and c.get("iv")]
+    if not cand:
+        return None
+    return min(cand, key=lambda c: abs((c["strike"] / S - 1) - target))
+
+
+def _max_pain(chain):
+    """最大痛苦点:遍历每个候选行权价 K 作为到期结算价,算所有期权买方的总内在价值,
+    取使总内在价值(=卖方赔付)最小的 K。用 OI 加权。"""
+    strikes = sorted({c["strike"] for c in chain if c["strike"]})
+    if not strikes:
+        return None
+    calls = [(c["strike"], c.get("oi") or 0) for c in chain if c["right"] == "call"]
+    puts = [(c["strike"], c.get("oi") or 0) for c in chain if c["right"] == "put"]
+    best_K, best_pay = None, None
+    for K in strikes:
+        pay = 0.0
+        for k, oi in calls:
+            if K > k:
+                pay += (K - k) * oi
+        for k, oi in puts:
+            if K < k:
+                pay += (k - K) * oi
+        if best_pay is None or pay < best_pay:
+            best_pay, best_K = pay, K
+    return best_K
+
+
+def positioning_for(symbol: str, params: dict = None):
+    """用期权链快照的持仓结构判势,盘前可用。返回四个信号 + 综合势能分。"""
+    p = {**POS_DEFAULTS, **(params or {})}
+    symbol = symbol.upper().strip()
+    S = underlying_price(symbol)
+    if not S:
+        return {"symbol": symbol, "error": "拿不到标的现价(可能没有美股行情权限)"}
+
+    from screener import list_expirations
+    exps = [e for e in list_expirations(symbol) if 0 <= e["dte"] <= p["max_dte"]][: p["max_expiries"]]
+    if not exps:
+        exps = list_expirations(symbol)[:1]  # 兜底:至少拿最近一个
+
+    chain, used = [], []
+    for e in exps:
+        try:
+            legs = normalize_chain(symbol, e["date"])
+            for leg in legs:
+                leg["_dte"] = e["dte"]
+                leg["_expiry"] = e["date"]
+            chain.extend(legs)
+            used.append({"date": e["date"], "dte": e["dte"], "legs": len(legs)})
+        except Exception as ex:
+            used.append({"date": e["date"], "error": str(ex)})
+    if not chain:
+        return {"symbol": symbol, "price": round(S, 2), "error": "拿不到期权链", "expirations": used}
+
+    calls = [c for c in chain if c["right"] == "call"]
+    puts = [c for c in chain if c["right"] == "put"]
+
+    # ---- 信号1: Put/Call 比(OI 和成交量两种口径)----
+    call_oi = sum(c.get("oi") or 0 for c in calls)
+    put_oi = sum(c.get("oi") or 0 for c in puts)
+    call_vol = sum(c.get("volume") or 0 for c in calls)
+    put_vol = sum(c.get("volume") or 0 for c in puts)
+    pcr_oi = round(put_oi / call_oi, 2) if call_oi else None
+    pcr_vol = round(put_vol / call_vol, 2) if call_vol else None
+
+    # ---- 信号2: Max Pain ----
+    mp = _max_pain(chain)
+    mp_gap = round(mp / S - 1, 4) if mp else None  # 相对现价:正=痛点在上方,负=在下方
+
+    # ---- 信号3: OI 墓碑(阻力/支撑)----
+    # 只在现价 ±20% 内找,避免远端虚值的历史 OI 堆积给出无意义的"支撑/阻力"。
+    near = [c for c in chain if c["strike"] and abs(c["strike"] / S - 1) <= 0.20]
+    near_calls = [c for c in near if c["right"] == "call" and c["strike"] >= S]  # 阻力在上方
+    near_puts = [c for c in near if c["right"] == "put" and c["strike"] <= S]    # 支撑在下方
+    call_wall = max(near_calls, key=lambda c: c.get("oi") or 0, default=None)
+    put_wall = max(near_puts, key=lambda c: c.get("oi") or 0, default=None)
+    resistance = call_wall["strike"] if call_wall and (call_wall.get("oi") or 0) > 0 else None
+    support = put_wall["strike"] if put_wall and (put_wall.get("oi") or 0) > 0 else None
+
+    # ---- 信号4: IV 偏斜(价外 put IV - 价外 call IV)----
+    m = p["skew_moneyness"]
+    otm_put = _nearest_by_moneyness(chain, S, "put", -m)
+    otm_call = _nearest_by_moneyness(chain, S, "call", +m)
+    skew = None
+    if otm_put and otm_call and otm_put.get("iv") and otm_call.get("iv"):
+        skew = round(otm_put["iv"] - otm_call["iv"], 4)
+
+    # ---- 综合势能分:各信号投票,-100(看空)~+100(看多)----
+    votes = []  # (名称, 分值 -1~+1, 说明)
+    if pcr_oi is not None:
+        v = -1 if pcr_oi > 1.2 else (1 if pcr_oi < 0.7 else 0)
+        votes.append(("Put/Call OI", v, f"PCR(OI)={pcr_oi}"))
+    if pcr_vol is not None:
+        v = -1 if pcr_vol > 1.2 else (1 if pcr_vol < 0.7 else 0)
+        votes.append(("Put/Call 成交", v, f"PCR(量)={pcr_vol}"))
+    if mp_gap is not None:
+        # 痛点明显在现价上方→有上拉动能(偏多);明显在下方→偏空;±1.5% 内算中性
+        v = 1 if mp_gap > 0.015 else (-1 if mp_gap < -0.015 else 0)
+        votes.append(("Max Pain", v, f"痛点{'上方' if mp_gap>0 else '下方'} {abs(mp_gap)*100:.1f}%"))
+    if skew is not None:
+        # 正偏斜(put 更贵)偏防御/看空;负偏斜偏看多
+        v = -1 if skew > 0.02 else (1 if skew < -0.02 else 0)
+        votes.append(("IV 偏斜", v, f"skew={skew*100:+.1f}pt"))
+
+    score = round(100 * sum(v for _, v, _ in votes) / len(votes)) if votes else 0
+    if score >= 40:
+        verdict = "偏看多"
+    elif score <= -40:
+        verdict = "偏看空"
+    elif votes and all(v == 0 for _, v, _ in votes):
+        verdict = "中性"
+    else:
+        verdict = "多空分歧"
+
+    return {
+        "symbol": symbol,
+        "price": round(S, 2),
+        "expirations": used,
+        "score": score,
+        "verdict": verdict,
+        "signals": {
+            "pcr_oi": pcr_oi, "pcr_vol": pcr_vol,
+            "call_oi": int(call_oi), "put_oi": int(put_oi),
+            "max_pain": mp, "max_pain_gap": mp_gap,
+            "resistance": resistance, "resistance_oi": int(call_wall.get("oi") or 0) if call_wall else None,
+            "support": support, "support_oi": int(put_wall.get("oi") or 0) if put_wall else None,
+            "skew": skew,
+            "skew_put_iv": otm_put.get("iv") if otm_put else None,
+            "skew_call_iv": otm_call.get("iv") if otm_call else None,
+        },
+        "votes": [{"name": n, "score": v, "note": note} for n, v, note in votes],
+    }

@@ -333,6 +333,33 @@ def flow_direction():
     return jsonify(_cache_put(key, res))
 
 
+@app.get("/api/positioning")
+def flow_positioning():
+    """用期权链持仓结构(Put/Call比、Max Pain、OI墓碑、IV偏斜)判势,盘前也能用。"""
+    ticker = (request.args.get("ticker") or "").upper().strip()
+    if not ticker:
+        return jsonify({"error": "缺少 ticker 参数"}), 400
+    p = {}
+    for k in ("max_expiries", "max_dte"):
+        if k in request.args:
+            p[k] = int(float(request.args[k]))
+    if "skew_moneyness" in request.args:
+        p["skew_moneyness"] = float(request.args["skew_moneyness"])
+    key = json.dumps({"pos": ticker, "p": p}, sort_keys=True)
+
+    if request.args.get("force") != "1":
+        cached = _cache_get(key)
+        if cached:
+            return jsonify({**cached, "cached": True})
+
+    t0 = time.time()
+    res = flow.positioning_for(ticker, p)
+    res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    res["elapsed"] = round(time.time() - t0, 1)
+    res["cached"] = False
+    return jsonify(_cache_put(key, res))
+
+
 # 静态托管
 @app.get("/")
 def index():
