@@ -389,6 +389,32 @@ def flow_biglots():
     return jsonify(_cache_put(key, res))
 
 
+@app.get("/api/ai_analysis")
+def ai_analysis():
+    """AI 期权分析:把持仓结构交给 Claude,输出一段"期权小班长"风格的简短判断。"""
+    import analyst
+    ticker = (request.args.get("ticker") or "").upper().strip()
+    if not ticker:
+        return jsonify({"error": "缺少 ticker 参数"}), 400
+    p = {}
+    for k in ("max_expiries", "max_dte"):
+        if k in request.args:
+            p[k] = int(float(request.args[k]))
+    key = json.dumps({"ai": ticker, "p": p}, sort_keys=True)
+
+    if request.args.get("force") != "1":
+        cached = _cache_get(key)
+        if cached:
+            return jsonify({**cached, "cached": True})
+
+    t0 = time.time()
+    res = analyst.analyze(ticker, p)
+    res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    res["elapsed"] = round(time.time() - t0, 1)
+    res["cached"] = False
+    return jsonify(_cache_put(key, res))
+
+
 # 静态托管
 @app.get("/")
 def index():

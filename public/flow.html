@@ -193,9 +193,11 @@
             <span class="tot">${g.count} 条命中 · 合计 ${money(g.total_notional)}</span>
             <button class="dirbtn" onclick="analyzeDir('${esc(g.symbol)}', this)">判方向</button>
             <button class="dirbtn" onclick="analyzePos('${esc(g.symbol)}', this)" title="用持仓结构判势,盘前也能用">📊 持仓判势</button>
+            <button class="dirbtn" onclick="aiAnalyze('${esc(g.symbol)}', this)" title="AI 把持仓结构翻译成一段人话点评">🤖 AI点评</button>
           </div>
           <div class="dirbox" id="dir-${esc(g.symbol)}" style="display:none"></div>
           <div class="dirbox" id="pos-${esc(g.symbol)}" style="display:none"></div>
+          <div class="dirbox" id="ai-${esc(g.symbol)}" style="display:none"></div>
           <table>
             <thead><tr>
               <th>合约</th><th>到期</th><th>价外幅度</th><th>成交量</th><th>未平仓</th>
@@ -304,6 +306,40 @@
         btn.disabled = false;
       }
     }
+
+    // 点「AI点评」:把持仓结构交给 Claude 写一段小班长风格点评
+    const AI_VMAP = { "偏看多": "v-bull", "偏看空": "v-bear", "多空分歧": "v-mix", "中性": "v-none" };
+    window.aiAnalyze = async function aiAnalyze(symbol, btn) {
+      const box = document.getElementById("ai-" + symbol);
+      if (!box) return;
+      if (box.style.display !== "none" && box.dataset.loaded === "1") {
+        box.style.display = "none"; box.dataset.loaded = "0"; btn.textContent = "🤖 AI点评"; return;
+      }
+      box.style.display = "block";
+      box.innerHTML = '<div class="inner muted">🤖 AI 正在读持仓结构、写点评(约 15–25 秒)…</div>';
+      btn.disabled = true; btn.textContent = "生成中…";
+      try {
+        const d = await (await fetch("/api/ai_analysis?ticker=" + encodeURIComponent(symbol))).json();
+        if (d.error) { box.innerHTML = `<div class="inner err">${esc(d.error)}</div>`; return; }
+        const vClass = AI_VMAP[d.verdict] || "v-none";
+        box.innerHTML = `<div class="inner">
+          <div style="margin-bottom:8px">
+            <span class="verdict ${vClass}">🤖 ${esc(d.verdict || "AI点评")}</span>
+            <span class="cover">势能分 ${d.score > 0 ? "+" : ""}${d.score}</span>
+          </div>
+          <div style="font-size:13.5px;line-height:1.8;color:#1f2937;white-space:pre-wrap">${esc(d.analysis || "")}</div>
+          <div class="cover" style="margin-top:8px">
+            AI 基于期权持仓结构(OI/IV)生成,非当日新单、看不出买开卖开。仅供研究参考,不构成投资建议。
+          </div>
+        </div>`;
+        box.dataset.loaded = "1";
+        btn.textContent = "收起";
+      } catch (e) {
+        box.innerHTML = `<div class="inner err">AI 分析失败:${esc(e.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    };
 
     // 毫秒时间戳 -> 美东 HH:MM:SS
     const etTime = (ms) => {
