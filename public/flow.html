@@ -164,6 +164,7 @@
         const share = g.call_share;
         const trs = rows.map(r => {
           const isCall = r.right === "call";
+          const rowId = `${esc(g.symbol)}-${esc(r.expiry)}-${r.right}-${r.strike}`.replace(/[^A-Za-z0-9_-]/g, "_");
           return `<tr>
             <td><span class="${isCall ? "cw" : "pw"}">${isCall ? "C" : "P"}</span>
                 <b>${esc(r.strike)}</b>
@@ -176,7 +177,11 @@
             <td class="muted">$${r.avg_px}</td>
             <td><b>${money(r.notional)}</b></td>
             <td class="muted">${r.iv == null ? "—" : pct(r.iv, 0)}</td>
-          </tr>`;
+            <td><button class="dirbtn" style="padding:2px 8px"
+                onclick="showLots('${esc(g.symbol)}','${esc(r.expiry)}','${r.right}',${r.strike},'${rowId}',this)"
+                title="看这个合约当天的大单逐笔(几点成交/买还是卖)">🕐大单</button></td>
+          </tr>
+          <tr id="lots-${rowId}" style="display:none"><td colspan="10" style="padding:0"></td></tr>`;
         }).join("");
         return `<div class="group">
           <div class="grouphead">
@@ -194,7 +199,7 @@
           <table>
             <thead><tr>
               <th>合约</th><th>到期</th><th>价外幅度</th><th>成交量</th><th>未平仓</th>
-              <th>量/仓</th><th>中价</th><th>名义金额</th><th>IV</th>
+              <th>量/仓</th><th>中价</th><th>名义金额</th><th>IV</th><th></th>
             </tr></thead>
             <tbody>${trs}</tbody>
           </table>
@@ -299,6 +304,74 @@
         btn.disabled = false;
       }
     }
+
+    // 毫秒时间戳 -> 美东 HH:MM:SS
+    const etTime = (ms) => {
+      const d = new Date(ms);
+      // 用 Intl 直接转美东,免手算夏令时
+      return new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(d);
+    };
+
+    // 点合约行的「🕐大单」:展开该合约当天的大单时间线
+    window.showLots = async function showLots(symbol, expiry, right, strike, rowId, btn) {
+      const tr = document.getElementById("lots-" + rowId);
+      if (!tr) return;
+      const cell = tr.firstElementChild;
+      if (tr.style.display !== "none" && tr.dataset.loaded === "1") {
+        tr.style.display = "none"; tr.dataset.loaded = "0"; btn.textContent = "🕐大单"; return;
+      }
+      tr.style.display = "table-row";
+      cell.innerHTML = '<div class="inner muted" style="padding:11px 15px">⏳ 拉当天逐笔、筛大单中…</div>';
+      btn.disabled = true; btn.textContent = "…";
+      try {
+        const qs = new URLSearchParams({ ticker: symbol, expiry, right, strike, big_lot: 50 });
+        const d = await (await fetch("/api/biglots?" + qs)).json();
+        if (d.error) { cell.innerHTML = `<div class="inner err" style="padding:11px 15px">${esc(d.error)}</div>`; return; }
+        if (!d.lots || !d.lots.length) {
+          cell.innerHTML = `<div class="inner muted" style="padding:11px 15px">${esc(d.note || "当天没有 ≥50 张的大单。")}</div>`;
+          tr.dataset.loaded = "1"; btn.textContent = "🕐大单"; return;
+        }
+        // 按时间正序展示(时间线),但接口是按张数排的,这里前端再按时间排
+        const lots = [...d.lots].sort((a, b) => a.time - b.time);
+        const trs = lots.map(l => {
+          const biasCls = l.bias === "bullish" ? "b-bull" : (l.bias === "bearish" ? "b-bear" : "b-neu");
+          const biasTxt = l.bias === "bullish" ? "看涨" : (l.bias === "bearish" ? "看跌" : "—");
+          const sideTxt = l.side === "buy" ? "主动买" : (l.side === "sell" ? "主动卖" : "—");
+          return `<tr>
+            <td style="text-align:left">${etTime(l.time)}</td>
+            <td><b>${num(l.volume)}</b> 张</td>
+            <td class="muted">$${l.price}</td>
+            <td>${money(l.notional)}</td>
+            <td>${sideTxt}</td>
+            <td class="${biasCls}">${biasTxt}</td>
+          </tr>`;
+        }).join("");
+        cell.innerHTML = `<div class="inner" style="padding:11px 15px">
+          <div style="margin-bottom:6px;font-size:12px;color:#475569">
+            当天 ${num(d.ticks)} 笔逐笔 · 大单(≥${d.big_lot}张)<b>${d.big_count}</b> 笔 ·
+            大单主买 <span class="b-bull">${num(d.big_buy_vol)}</span> 张 vs
+            大单主卖 <span class="b-bear">${num(d.big_sell_vol)}</span> 张(美东时间)
+          </div>
+          <table style="font-size:12px">
+            <thead><tr>
+              <th style="text-align:left">成交时刻</th><th>张数</th><th>成交价</th>
+              <th>名义额</th><th>方向</th><th>多空</th>
+            </tr></thead>
+            <tbody>${trs}</tbody>
+          </table>
+          <div class="cover" style="margin-top:6px">
+            方向用 tick rule 推(涨价成交=主动买,跌价=主动卖),非交易所方向标志;单腿看不出是否属于价差/备兑组合,仅供参考。
+          </div>
+        </div>`;
+        tr.dataset.loaded = "1";
+        btn.textContent = "收起";
+      } catch (e) {
+        cell.innerHTML = `<div class="inner err" style="padding:11px 15px">失败:${esc(e.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    };
 
     document.getElementById("go").onclick = () => load(true);
     document.getElementById("preset").onchange = () => load(false);

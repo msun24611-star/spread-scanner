@@ -360,6 +360,35 @@ def flow_positioning():
     return jsonify(_cache_put(key, res))
 
 
+@app.get("/api/biglots")
+def flow_biglots():
+    """某个合约当日的大单时间线:每笔大单的成交时刻/价/方向。需开盘时段才有逐笔。
+    参数:ticker, expiry(YYYY-MM-DD), right(call|put), strike, 可选 big_lot / top_lots。"""
+    ticker = (request.args.get("ticker") or "").upper().strip()
+    expiry = (request.args.get("expiry") or "").strip()
+    right = (request.args.get("right") or "").strip().lower()
+    strike = request.args.get("strike")
+    if not (ticker and expiry and right in ("call", "put") and strike):
+        return jsonify({"error": "需要 ticker / expiry / right(call|put) / strike 四个参数"}), 400
+    p = {}
+    for k in ("big_lot", "top_lots"):
+        if k in request.args:
+            p[k] = int(float(request.args[k]))
+    key = json.dumps({"big": ticker, "e": expiry, "r": right, "k": strike, "p": p}, sort_keys=True)
+
+    if request.args.get("force") != "1":
+        cached = _cache_get(key)
+        if cached:
+            return jsonify({**cached, "cached": True})
+
+    t0 = time.time()
+    res = flow.big_lots_for(ticker, expiry, right, strike, p)
+    res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    res["elapsed"] = round(time.time() - t0, 1)
+    res["cached"] = False
+    return jsonify(_cache_put(key, res))
+
+
 # 静态托管
 @app.get("/")
 def index():

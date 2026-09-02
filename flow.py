@@ -239,6 +239,84 @@ def analyze_contract(row, p):
                                        100 * (share if side == "buy" else 1 - share))}
 
 
+# ---------------------------------------------------------------- 大单时间线
+BIGLOT_DEFAULTS = {
+    "big_lot": 50,        # 单笔 >= 多少张算大单
+    "top_lots": 60,       # 最多返回几笔(按张数降序)
+}
+
+
+def _tick_side(prices, i, last_dir):
+    """tick rule 判单笔方向:较上一笔涨=主动买(+1),跌=主动卖(-1),平=沿用上一方向。"""
+    if i == 0:
+        return 0
+    if prices[i] > prices[i - 1]:
+        return 1
+    if prices[i] < prices[i - 1]:
+        return -1
+    return last_dir
+
+
+def big_lots_for(symbol, expiry, right, strike, params=None):
+    """拉某个合约当日全部逐笔,筛出单笔 >= big_lot 张的大单,每笔带成交时刻/价/方向。
+    right='call'|'put',strike 为行权价。方向用 tick rule 推(主动买/卖),再映射多空。"""
+    p = {**BIGLOT_DEFAULTS, **(params or {})}
+    from tiger import quote
+    ident = occ_identifier(symbol.upper(), expiry, right, float(strike))
+    df = quote().get_option_trade_ticks([ident])
+    n = len(df)
+    right = right.lower()
+    base = {"symbol": symbol.upper(), "identifier": ident, "expiry": expiry,
+            "right": right, "strike": float(strike), "ticks": n, "big_lot": p["big_lot"]}
+    if not n:
+        return {**base, "lots": [], "note": "没有逐笔数据(盘前/盘后拿不到当日逐笔,需开盘时段)"}
+
+    prices = df["price"].tolist()
+    vols = df["volume"].tolist()
+    times = df["time"].tolist()
+    last_dir = 0
+    lots = []
+    tot_buy = tot_sell = 0
+    for i in range(n):
+        d = _tick_side(prices, i, last_dir)
+        if d:
+            last_dir = d
+        v = int(vols[i])
+        if d > 0:
+            tot_buy += v
+        elif d < 0:
+            tot_sell += v
+        if v < p["big_lot"]:
+            continue
+        side = "buy" if d > 0 else ("sell" if d < 0 else "unknown")
+        # 买 call / 卖 put = 看涨;卖 call / 买 put = 看跌
+        if side == "unknown":
+            bias = "unknown"
+        else:
+            bias = "bullish" if ((side == "buy") == (right == "call")) else "bearish"
+        lots.append({
+            "time": int(times[i]),               # 毫秒时间戳,前端转美东时间
+            "price": round(float(prices[i]), 4),
+            "volume": v,
+            "notional": int(round(float(prices[i]) * v * CONTRACT_MULT)),
+            "side": side,
+            "bias": bias,
+        })
+
+    lots.sort(key=lambda x: x["volume"], reverse=True)
+    big_buy = sum(l["volume"] for l in lots if l["side"] == "buy")
+    big_sell = sum(l["volume"] for l in lots if l["side"] == "sell")
+    return {
+        **base,
+        "lots": lots[: p["top_lots"]],
+        "big_count": len(lots),
+        "big_buy_vol": big_buy,
+        "big_sell_vol": big_sell,
+        "day_buy_vol": tot_buy,
+        "day_sell_vol": tot_sell,
+    }
+
+
 def direction_for(symbol: str, params: dict = None):
     """对某标的的前 N 个异动合约逐一判方向,再汇总成标的层面的倾向。"""
     p = {**DEFAULTS, **DIR_DEFAULTS, **(params or {})}
