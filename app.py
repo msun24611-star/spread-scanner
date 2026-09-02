@@ -29,6 +29,7 @@ except Exception:
 
 from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
 
+import flow
 import screener
 import tiger
 
@@ -43,16 +44,23 @@ LOGIN_LOCKOUT_SEC = 600    # 超限后锁定时长:10 分钟
 
 
 def _load_password():
-    """访问密码:优先环境变量 SCANNER_PASSWORD,否则读 access_password.txt,否则默认。
-    公网分享给熟人前,请改掉默认密码。"""
+    """访问密码:优先环境变量 SCANNER_PASSWORD,否则读 access_password.txt。
+    两者都没有就拒绝启动 —— 本仓库是公开的,任何硬编码的兜底默认值都等于没有密码。"""
     pw = os.environ.get("SCANNER_PASSWORD")
-    if pw:
+    if pw and pw.strip():
         return pw.strip()
     p = os.path.join(HERE, "access_password.txt")
     if os.path.exists(p):
         with open(p, encoding="utf-8") as f:
-            return f.read().strip()
-    return "tiger2026"  # ⚠️ 默认密码,公网分享前务必改
+            val = f.read().strip()
+            if val:
+                return val
+    raise SystemExit(
+        "❌ 未设置访问密码,拒绝启动。\n"
+        "   请二选一:\n"
+        "   1) 设置环境变量 SCANNER_PASSWORD=<你的强密码>\n"
+        f"   2) 在 {HERE} 下创建 access_password.txt,内容为一个强密码\n"
+    )
 
 
 def _load_secret():
@@ -261,6 +269,64 @@ def scan():
     else:
         syms, _ = _load_watchlist()
         res = screener.scan_many(syms, p)
+    res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    res["elapsed"] = round(time.time() - t0, 1)
+    res["cached"] = False
+    return jsonify(_cache_put(key, res))
+
+
+@app.get("/api/flow")
+def flow_scan():
+    """期权异动(七大科技股 + SPY/QQQ)。口径见 flow.py 头部注释:
+    合约级异动(成交量/未平仓/名义金额),不是逐笔大单。"""
+    p = {}
+    for k in ("min_dte", "max_dte", "max_expiries", "min_volume",
+              "min_notional", "top_per_symbol"):
+        if k in request.args:
+            p[k] = int(float(request.args[k]))
+    if "min_vol_oi" in request.args:
+        p["min_vol_oi"] = float(request.args["min_vol_oi"])
+    ticker = (request.args.get("ticker") or "").upper().strip()
+    syms = [ticker] if ticker else None
+    key = json.dumps({"flow": ticker or "ALL", "p": p}, sort_keys=True)
+
+    if request.args.get("force") != "1":
+        cached = _cache_get(key)
+        if cached:
+            return jsonify({**cached, "cached": True})
+
+    t0 = time.time()
+    res = flow.scan_all(syms, p)
+    res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    res["elapsed"] = round(time.time() - t0, 1)
+    res["cached"] = False
+    return jsonify(_cache_put(key, res))
+
+
+@app.get("/api/direction")
+def flow_direction():
+    """对某个标的的异动合约逐笔判方向(看涨/看跌)。
+    口径与局限见 flow.py 里「方向怎么判」那段注释 —— tick rule 推的,不是交易所方向标志。"""
+    ticker = (request.args.get("ticker") or "").upper().strip()
+    if not ticker:
+        return jsonify({"error": "缺少 ticker 参数"}), 400
+    p = {}
+    for k in ("min_volume", "min_notional", "max_dte", "max_expiries",
+              "min_flow_volume", "big_lot", "top_contracts"):
+        if k in request.args:
+            p[k] = int(float(request.args[k]))
+    for k in ("min_vol_oi", "decisive_share"):
+        if k in request.args:
+            p[k] = float(request.args[k])
+    key = json.dumps({"dir": ticker, "p": p}, sort_keys=True)
+
+    if request.args.get("force") != "1":
+        cached = _cache_get(key)
+        if cached:
+            return jsonify({**cached, "cached": True})
+
+    t0 = time.time()
+    res = flow.direction_for(ticker, p)
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False

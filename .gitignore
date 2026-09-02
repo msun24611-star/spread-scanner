@@ -20,7 +20,8 @@ scan.json
 cloudflared.exe
 
 # === 编辑器/工具本地配置 ===
-# 含调试用的密码与临时隧道网址
-.claude/settings.local.json
+# .claude/ 整个排除:settings.local.json 含调试密码与临时隧道网址,
+# launch.json 等也只是本机配置,没有分享价值。
+.claude/
 .vscode/
 .idea/

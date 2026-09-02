@@ -10,6 +10,15 @@
     h1 { font-size: 22px; margin-bottom: 2px; }
     .sub { color: #666; font-size: 13px; margin-bottom: 16px; }
     a { color: #2563eb; text-decoration: none; }
+    .intro { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 15px;
+      font-size: 13px; color: #444; line-height: 1.7; margin-bottom: 14px; }
+    .intro b { color: #1a1a1a; }
+    .intro .k { color: #2563eb; font-weight: 700; }
+    .presets { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .presets > span:first-child { font-size: 13px; color: #666; }
+    button.preset { font-size: 13px; background: #fff; border: 1px solid #d1d5db; color: #444; }
+    button.preset.active { background: #eff6ff; border-color: #2563eb; color: #1d4ed8; font-weight: 700; }
+    .preset-hint { font-size: 12px; color: #888; }
     .banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
     .banner.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
     .banner.bad { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
@@ -47,9 +56,24 @@
 <body>
   <h1>📐 垂直价差机会发现</h1>
   <div class="sub">实时扫描期权链,筛选并排序<b>信用价差</b>(Bull Put / Bear Call)机会 · 卖方 · 综合评分 ·
-    <a href="/tech.html">🚀 七大科技股高频到期 →</a></div>
+    <a href="/tech.html">🚀 七大科技股高频到期 →</a> · <a href="/flow.html">⚡ 期权异动 →</a></div>
+
+  <div class="intro">
+    这是一个<b>卖方信用价差</b>扫描器:卖出一个期权、再买一个更远的期权做保护,赚取权利金。核心看两个指标 ——
+    <br>· <span class="k">POP(胜率)</span>:这笔到期赚钱的概率。越高越稳,但权利金越薄。
+    <br>· <span class="k">RoR(回报风险比)</span>:最大能赚 ÷ 最大能亏。越高越划算,但通常意味着离行权价更近、胜率更低。
+    <br><b>这俩天生矛盾</b> —— 想胜率高就得让利收益,想收益高就得担更大风险。下面「偏好」一键帮你调好参数,你也可手动改。
+  </div>
 
   <div id="banner" class="banner" style="display:none"></div>
+
+  <div class="presets">
+    <span>偏好:</span>
+    <button class="preset" data-preset="winrate">🛡️ 高胜率优先</button>
+    <button class="preset" data-preset="balanced">⚖️ 均衡</button>
+    <button class="preset" data-preset="return">🚀 高收益优先</button>
+    <span id="presetHint" class="preset-hint"></span>
+  </div>
 
   <div class="controls">
     <button id="btnAll" class="primary">🔍 扫描全池</button>
@@ -147,9 +171,13 @@
     function render() {
       const side = document.getElementById("fSide").value;
       const sortKey = document.getElementById("fSort").value;
+      const minPop = Number(document.getElementById("fPop").value || 0) / 100;
+      const minRor = Number(document.getElementById("fRor").value || 0) / 100;
       let rows = ROWS.slice();
       if (side) rows = rows.filter(r => r.side === side);
       if (document.getElementById("fHideEarn").checked) rows = rows.filter(r => !r.earnings_in_window);
+      // 客户端按 POP/RoR 即时收紧(POP 为空的条目不因此被剔除)
+      rows = rows.filter(r => (r.pop == null || r.pop >= minPop) && (r.ror == null || r.ror >= minRor));
       rows.sort((a, b) => (b[sortKey] ?? -Infinity) - (a[sortKey] ?? -Infinity));
 
       const el = document.getElementById("content");
@@ -214,6 +242,27 @@
       }).join("");
     }
 
+    // 偏好预设:一键调好 POP/RoR/排序。高胜率优先为默认。
+    const PRESETS = {
+      winrate:  { pop: 75, ror: 10, sort: "pop",   hint: "高胜率:POP≥75%,牺牲部分收益换稳。适合稳健、不追高收益。" },
+      balanced: { pop: 65, ror: 20, sort: "score", hint: "均衡:POP≥65% 且 RoR≥20%,综合评分排序。" },
+      return:   { pop: 55, ror: 35, sort: "ror",   hint: "高收益:RoR≥35%,胜率放宽到 55%,单笔赚得多但更易亏。" },
+    };
+    function applyPreset(name) {
+      const p = PRESETS[name];
+      if (!p) return;
+      document.getElementById("fPop").value = p.pop;
+      document.getElementById("fRor").value = p.ror;
+      document.getElementById("fSort").value = p.sort;
+      document.getElementById("presetHint").textContent = p.hint;
+      document.querySelectorAll(".preset").forEach(b =>
+        b.classList.toggle("active", b.dataset.preset === name));
+      // 已有结果就即时重排;POP/RoR 收紧需要重扫才严格生效,这里先重排给即时反馈
+      if (ROWS.length) render();
+    }
+    document.querySelectorAll(".preset").forEach(b =>
+      b.addEventListener("click", () => applyPreset(b.dataset.preset)));
+
     document.getElementById("btnAll").addEventListener("click", () => scan(""));
     document.getElementById("btnOne").addEventListener("click", () => {
       const t = document.getElementById("ticker").value.trim().toUpperCase();
@@ -223,7 +272,13 @@
       if (e.key === "Enter") document.getElementById("btnOne").click();
     });
     ["fSide", "fSort", "fHideEarn"].forEach(id => document.getElementById(id).addEventListener("change", render));
+    // POP/RoR 手动改动也即时重筛;手动改后取消预设高亮
+    ["fPop", "fRor"].forEach(id => document.getElementById(id).addEventListener("input", () => {
+      document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+      if (ROWS.length) render();
+    }));
 
+    applyPreset("winrate");  // 默认高胜率优先(符合你的偏好)
     checkStatus();
     // 支持 /?ticker=NVDA 从科技股页跳进来自动扫
     const qp = new URLSearchParams(location.search).get("ticker");
