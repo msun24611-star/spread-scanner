@@ -166,10 +166,43 @@ def expiry_cadence(symbol: str, horizon: int = 16):
             "weekdays": sorted(biz), "expiries": days, "earnings": earnings_for(symbol)}
 
 
+_CHAIN_CALL_TS = []          # option_chain 调用时间戳滑动窗口,跨 screener/flow/positions 共享
+_CHAIN_LIMIT_PER_MIN = 55    # 老虎接口上限 60次/分钟,留点余量
+
+
+def _throttle_chain_call():
+    """把 option_chain 调用速率控制在滑动 60 秒窗口内 ≤_CHAIN_LIMIT_PER_MIN 次,
+    避免一次扫描(如期权异动页 9 个标的 × 多个到期日)瞬间打爆老虎的限流。"""
+    now = time.time()
+    while _CHAIN_CALL_TS and now - _CHAIN_CALL_TS[0] > 60:
+        _CHAIN_CALL_TS.pop(0)
+    if len(_CHAIN_CALL_TS) >= _CHAIN_LIMIT_PER_MIN:
+        wait = 60 - (now - _CHAIN_CALL_TS[0]) + 0.2
+        if wait > 0:
+            time.sleep(wait)
+        now = time.time()
+        while _CHAIN_CALL_TS and now - _CHAIN_CALL_TS[0] > 60:
+            _CHAIN_CALL_TS.pop(0)
+    _CHAIN_CALL_TS.append(now)
+
+
+def _fetch_option_chain(symbol: str, expiry: str, retries: int = 2):
+    """带限流节流 + 限流报错重试的 get_option_chain 包装。"""
+    for attempt in range(retries + 1):
+        _throttle_chain_call()
+        try:
+            return quote().get_option_chain(symbol=symbol, expiry=expiry, return_greek_value=True)
+        except Exception as ex:
+            if "rate limit" in str(ex).lower() and attempt < retries:
+                time.sleep(3)
+                continue
+            raise
+
+
 def normalize_chain(symbol: str, expiry: str):
     """拉一个到期日的期权链,标准化成统一字段的 list。
     统一字段: right('call'/'put'), strike, bid, ask, last, iv, delta, oi, volume。"""
-    df = quote().get_option_chain(symbol=symbol, expiry=expiry, return_greek_value=True)
+    df = _fetch_option_chain(symbol, expiry)
     rows = df.to_dict(orient="records") if hasattr(df, "to_dict") else list(df)
     out = []
     for r in rows:

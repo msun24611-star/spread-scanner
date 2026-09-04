@@ -3,37 +3,44 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>🚀 七大科技股 · 高频到期</title>
+  <title>七大科技股 · 高频到期</title>
   <style>
     body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-      max-width: 1040px; margin: 0 auto; padding: 22px 20px 60px; color: #1a1a1a; line-height: 1.55; background: #fafafa; }
-    h1 { font-size: 22px; margin-bottom: 2px; }
-    .sub { color: #666; font-size: 13px; margin-bottom: 16px; }
+      max-width: 1040px; margin: 0 auto; padding: 20px 20px 56px; color: #111827; line-height: 1.5; background: #f9fafb; }
+    h1 { font-size: 18px; font-weight: 600; margin-bottom: 2px; }
+    .sub { color: #6b7280; font-size: 12.5px; margin-bottom: 16px; }
     a { color: #2563eb; text-decoration: none; }
-    #stat { font-size: 13px; color: #888; margin-bottom: 12px; }
-    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; background: #fff; }
-    .card.hot { border-color: #f59e0b; box-shadow: 0 0 0 1px #fde68a inset; }
+    #stat { font-size: 12.5px; color: #9ca3af; margin-bottom: 10px; }
+    .overview { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .ocard { flex: 1 1 140px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff;
+      padding: 11px 15px; }
+    .ocard .k { font-size: 11.5px; color: #9ca3af; margin-bottom: 3px; }
+    .ocard .v { font-size: 19px; font-weight: 600; color: #111827; }
+    .ocard .v.hl { color: #2563eb; }
+    .card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 13px 15px; margin-bottom: 10px; background: #fff; }
+    .card.hot { border-color: #fde68a; background: #fffbeb; }
     .row1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .tkr { font-size: 19px; font-weight: 700; }
-    .cad { font-size: 12px; padding: 3px 10px; border-radius: 999px; font-weight: 600; }
-    .cad.freq { background: #ecfdf5; color: #065f46; }
-    .cad.norm { background: #f1f5f9; color: #475569; }
-    .earn { background: #f59e0b; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
-    .exps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-    .exp { font-size: 12px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 3px 9px; color: #333; background: #fbfbfb; }
+    .tkr { font-size: 16px; font-weight: 700; }
+    .cad { font-size: 11px; padding: 1px 7px; border-radius: 3px; font-weight: 600; border: 1px solid; }
+    .cad.freq { color: #065f46; border-color: #a7f3d0; background: #ecfdf5; }
+    .cad.norm { color: #475569; border-color: #e2e8f0; background: #f8fafc; }
+    .earn { color: #92400e; border: 1px solid #fde68a; background: #fffbeb; font-size: 11px; padding: 1px 7px; border-radius: 3px; font-weight: 600; }
+    .exps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+    .exp { font-size: 12px; border: 1px solid #e5e7eb; border-radius: 4px; padding: 2px 8px; color: #4b5563; background: #f9fafb; }
     .exp b { color: #2563eb; }
-    .go { margin-left: auto; padding: 7px 14px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; }
-    .footer { margin-top: 36px; font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 12px; }
+    .go { margin-left: auto; padding: 6px 12px; background: #2563eb; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; font-size: 12.5px; }
+    .footer { margin-top: 32px; font-size: 11.5px; color: #9ca3af; border-top: 1px solid #eee; padding-top: 12px; }
   </style>
 </head>
 <body>
-  <h1>🚀 七大科技股 · 高频到期</h1>
+  <h1>七大科技股 · 高频到期</h1>
   <div class="sub">七大科技股(AAPL/MSFT/GOOGL/AMZN/NVDA/META/TSLA)近两周到期节奏 ·
-    有<b>每周一/三/五</b>期权的适合做 1–7 天短线价差 · <a href="/">← 回价差扫描</a> · <a href="/flow.html">⚡ 期权异动</a></div>
-  <div id="stat">⏳ 加载中…</div>
+    有<b>每周一/三/五</b>期权的适合做 1–7 天短线价差 · <a href="/">← 回价差扫描</a> · <a href="/flow.html">期权异动</a> · <a href="/watch.html">我的观察</a></div>
+  <div id="stat">加载中…</div>
+  <div id="overview" class="overview"></div>
   <div id="content"></div>
 
-  <div class="footer">高频到期(周一三五/每日)= 1–7天短线可选到期多、择时更灵活。撞财报的用 ⚠️ 标出,短线尤其要避。个人研究,非投资建议。</div>
+  <div class="footer">高频到期(周一三五/每日)= 1–7天短线可选到期多、择时更灵活。撞财报的会标出,短线尤其要避。个人研究,非投资建议。</div>
 
   <script>
     const esc = (s) => String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -49,13 +56,26 @@
       }
     }
 
+    function renderOverview(stocks) {
+      const box = document.getElementById("overview");
+      if (!stocks.length) { box.innerHTML = ""; return; }
+      const freqN = stocks.filter(s => /每日|一\/三\/五/.test(s.label || "")).length;
+      const earnN = stocks.filter(s => s.earnings).length;
+      box.innerHTML = `
+        <div class="ocard"><div class="k">跟踪标的</div><div class="v">${stocks.length} 只</div></div>
+        <div class="ocard"><div class="k">高频到期</div><div class="v hl">${freqN} 只</div></div>
+        <div class="ocard"><div class="k">近期有财报</div><div class="v hl">${earnN} 只</div></div>
+      `;
+    }
+
     function render(stocks) {
+      renderOverview(stocks);
       document.getElementById("content").innerHTML = stocks.map(s => {
         const freq = /每日|一\/三\/五/.test(s.label || "");
         const exps = (s.expiries || []).map(e =>
           `<span class="exp">${esc(e.date.slice(5))} <b>${esc(e.wd)}</b> ${e.dte}d</span>`).join("");
         const earn = s.earnings
-          ? `<span class="earn" title="未来28天内财报">⚠️财报 ${esc(s.earnings.date)}${s.earnings.time ? " " + esc(s.earnings.time) : ""}</span>`
+          ? `<span class="earn" title="未来28天内财报">财报 ${esc(s.earnings.date)}${s.earnings.time ? " " + esc(s.earnings.time) : ""}</span>`
           : "";
         return `
           <div class="card ${freq ? "hot" : ""}">

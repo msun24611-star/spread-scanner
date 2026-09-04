@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>我的观察 · 价差跟踪</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      max-width: 1040px; margin: 0 auto; padding: 20px 20px 56px; color: #111827; line-height: 1.5; background: #f9fafb; }
+    h1 { font-size: 18px; font-weight: 600; margin-bottom: 2px; }
+    .sub { color: #6b7280; font-size: 12.5px; margin-bottom: 14px; }
+    a { color: #2563eb; text-decoration: none; }
+    .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px;
+      padding: 9px 13px; font-size: 12.5px; color: #78350f; margin-bottom: 14px; }
+    .note b { color: #92400e; }
+    #stat { font-size: 12.5px; color: #9ca3af; margin-bottom: 10px; }
+    .bar { margin-bottom: 12px; }
+    button { font-size: 13.5px; padding: 7px 12px; border: 1px solid #d1d5db; border-radius: 6px;
+      background: #fff; color: #111827; cursor: pointer; }
+    button.go { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; }
+    .empty { color: #9ca3af; padding: 40px 0; text-align: center; }
+    .err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+      border-radius: 6px; padding: 9px 13px; font-size: 12.5px; margin-bottom: 12px; }
+
+    .overview { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .ocard { flex: 1 1 140px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fff;
+      padding: 11px 15px; }
+    .ocard .k { font-size: 11.5px; color: #9ca3af; margin-bottom: 3px; }
+    .ocard .v { font-size: 19px; font-weight: 600; color: #111827; }
+    .ocard .v.pos { color: #16a34a; }
+    .ocard .v.neg { color: #dc2626; }
+
+    .card { border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 10px; padding: 13px 15px;
+      background: #fff; border-left: 3px solid #d1d5db; }
+    .card.win { background: #f0fdf4; border-left-color: #16a34a; }
+    .card.lose { background: #fef2f2; border-left-color: #dc2626; }
+    .row1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .tkr { font-size: 16px; font-weight: 700; }
+    .chip { font-size: 11px; padding: 1px 7px; border-radius: 3px; font-weight: 600; border: 1px solid; }
+    .bull { color: #166534; border-color: #bbf7d0; background: #f0fdf4; }
+    .bear { color: #991b1b; border-color: #fecaca; background: #fef2f2; }
+    .struct { color: #6b7280; font-size: 12.5px; }
+    .note-status { font-size: 12px; color: #b45309; margin-top: 6px; }
+    .row2 { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 9px; font-size: 12.5px; }
+    .row2 .k { color: #9ca3af; font-size: 11px; display: block; }
+    .row2 .v { font-weight: 600; font-size: 13.5px; }
+    .pnl-pos { color: #16a34a; }
+    .pnl-neg { color: #dc2626; }
+    .actions { margin-left: auto; display: flex; gap: 8px; align-self: flex-start; }
+    .btnsmall { font-size: 11.5px; padding: 4px 10px; border-radius: 5px; }
+    .btndel { color: #991b1b; border-color: #fecaca; }
+    .btnsugg { color: #1d4ed8; border-color: #bfdbfe; }
+
+    .suggbox { display: none; margin-top: 10px; padding: 10px 13px; background: #f9fafb;
+      border: 1px dashed #d1d5db; border-radius: 6px; font-size: 12.5px; }
+    .suggbox.open { display: block; }
+    .verdict { font-size: 12.5px; font-weight: 600; padding: 2px 8px; border-radius: 3px; margin-right: 8px; border: 1px solid; }
+    .v-lock  { color: #166534; border-color: #bbf7d0; background: #f0fdf4; }
+    .v-hold  { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+    .v-stop  { color: #991b1b; border-color: #fecaca; background: #fef2f2; }
+    .v-late  { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+    .v-watch { color: #475569; border-color: #e2e8f0; background: #f8fafc; }
+    .reason { color: #4b5563; margin-top: 6px; }
+    .popcmp { color: #9ca3af; font-size: 12px; margin-top: 6px; }
+    .footer { margin-top: 32px; font-size: 11.5px; color: #9ca3af; border-top: 1px solid #eee; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>我的观察</h1>
+  <div class="sub">跟踪加入观察的价差,浮动盈亏实时重估 ·
+    <a href="/">← 价差扫描</a> · <a href="/tech.html">到期节奏</a> · <a href="/flow.html">期权异动</a></div>
+
+  <div class="note">
+    <b>浮动盈亏是模拟重新估值,不是券商账户里的真实持仓。</b>
+    算法:记录加入观察时收到的权利金,之后用当前这两条腿的可执行报价(买回短腿付 ask、卖出长腿收 bid)算出「现在平仓要花多少钱」,差值就是浮动盈亏。
+    <br><b>「平仓建议」是公式和期望值模型的输出,不是投资建议</b>——结合当前胜率、已吃到的权利金比例、剩余天数算的,决定权在你自己。
+  </div>
+
+  <div class="bar"><button class="go" id="refresh">刷新</button></div>
+  <div id="stat"></div>
+  <div id="overview" class="overview"></div>
+  <div id="content"></div>
+
+  <div class="footer">
+    个人研究工具,不构成投资建议。期权卖方策略有亏损风险,平仓与否请自行判断。
+  </div>
+
+  <script>
+    const esc = (s) => String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const money = (v) => v == null ? "—" : (v < 0 ? "-$" + Math.abs(v).toFixed(2) : "$" + v.toFixed(2));
+    const pct = (v, d = 1) => v == null ? "—" : (v * 100).toFixed(d) + "%";
+    const CONTRACT_MULT = 100;
+
+    const VERDICT_CLASS = {
+      "建议锁盈": "v-lock", "继续持有": "v-hold", "止损/展期": "v-stop",
+      "临近到期,建议了结": "v-late", "浮亏观察,暂不到止损线": "v-watch",
+    };
+    // 更直白的一句话版本,徽章旁边直接说人话
+    const VERDICT_PLAIN = {
+      "建议锁盈": "我要下车", "继续持有": "我会拿着", "止损/展期": "我要认怂",
+      "临近到期,建议了结": "快到期了,先落袋", "浮亏观察,暂不到止损线": "先看看,不急着动",
+    };
+
+    async function load() {
+      document.getElementById("stat").textContent = "正在重新估值…";
+      document.getElementById("content").innerHTML = "";
+      try {
+        const d = await (await fetch("/api/watch")).json();
+        document.getElementById("stat").textContent =
+          `${d.count || 0} 条观察中 · asOf ${d.asOf || "—"}` + (d.elapsed != null ? ` · 用时${d.elapsed}s` : "");
+        renderOverview(d.positions || []);
+        render(d.positions || []);
+      } catch (e) {
+        document.getElementById("stat").textContent = "加载失败:" + e.message;
+      }
+    }
+
+    function renderOverview(rows) {
+      const box = document.getElementById("overview");
+      const live = rows.filter(r => !r.error && !r.status_note && r.pnl_dollars != null);
+      if (!live.length) { box.innerHTML = ""; return; }
+      const total = live.reduce((s, r) => s + r.pnl_dollars, 0);
+      const winN = live.filter(r => r.pnl_dollars >= 0).length;
+      const loseN = live.length - winN;
+      const totalCls = total >= 0 ? "pos" : "neg";
+      box.innerHTML = `
+        <div class="ocard"><div class="k">观察中</div><div class="v">${live.length} 笔</div></div>
+        <div class="ocard"><div class="k">合计浮动盈亏</div><div class="v ${totalCls}">${money(total)}</div></div>
+        <div class="ocard"><div class="k">浮盈 / 浮亏</div><div class="v"><span class="pos">${winN}</span> / <span class="neg">${loseN}</span></div></div>
+      `;
+    }
+
+    function render(rows) {
+      const box = document.getElementById("content");
+      if (!rows.length) {
+        box.innerHTML = `<div class="empty">还没有加入观察的价差,去 <a href="/">价差扫描</a> 加几个。</div>`;
+        return;
+      }
+      box.innerHTML = rows.map(r => {
+        const isBull = r.side === "bull_put";
+        const legTxt = isBull ? `卖${r.short_strike}/买${r.long_strike} Put` : `卖${r.short_strike}/买${r.long_strike} Call`;
+        const margin = (r.width - r.entry_credit) * CONTRACT_MULT;
+        const entryProfit = r.entry_credit * CONTRACT_MULT;
+
+        if (r.error) {
+          return `<div class="card">
+            <div class="row1">
+              <span class="tkr">${esc(r.symbol)}</span>
+              <span class="chip ${isBull ? "bull" : "bear"}">${isBull ? "Bull Put" : "Bear Call"}</span>
+              <span class="struct">${legTxt} · ${esc(r.expiry)}</span>
+              <div class="actions"><button class="btnsmall btndel" onclick="del('${r.id}')">删除观察</button></div>
+            </div>
+            <div class="err" style="margin-top:10px;margin-bottom:0">重新估值失败:${esc(r.error)}</div>
+          </div>`;
+        }
+        if (r.status_note) {
+          return `<div class="card">
+            <div class="row1">
+              <span class="tkr">${esc(r.symbol)}</span>
+              <span class="chip ${isBull ? "bull" : "bear"}">${isBull ? "Bull Put" : "Bear Call"}</span>
+              <span class="struct">${legTxt} · ${esc(r.expiry)}</span>
+              <div class="actions"><button class="btnsmall btndel" onclick="del('${r.id}')">删除观察</button></div>
+            </div>
+            <div class="note-status">${esc(r.status_note)}</div>
+          </div>`;
+        }
+
+        const pnlCls = r.pnl_dollars >= 0 ? "pnl-pos" : "pnl-neg";
+        const cardCls = r.pnl_dollars >= 0 ? "win" : "lose";
+        const s = r.suggestion || {};
+        const vcls = VERDICT_CLASS[s.verdict] || "v-watch";
+        const plain = VERDICT_PLAIN[s.verdict] || "";
+
+        return `<div class="card ${cardCls}">
+          <div class="row1">
+            <span class="tkr">${esc(r.symbol)}</span>
+            <span class="chip ${isBull ? "bull" : "bear"}">${isBull ? "Bull Put" : "Bear Call"}</span>
+            <span class="struct">${legTxt} · ${esc(r.expiry)}(剩 ${r.dte_now}天)</span>
+            <div class="actions">
+              <button class="btnsmall btnsugg" onclick="toggleSugg('${r.id}')">平仓建议</button>
+              <button class="btnsmall btndel" onclick="del('${r.id}')">删除观察</button>
+            </div>
+          </div>
+          <div class="row2">
+            <div><span class="k">保证金</span><span class="v">${money(margin)}</span></div>
+            <div><span class="k">入场收益</span><span class="v">${money(entryProfit)}</span></div>
+            <div><span class="k">现价</span><span class="v">$${r.spot_now}</span></div>
+            <div><span class="k">浮动盈亏</span><span class="v ${pnlCls}">${money(r.pnl_dollars)}(${pct(r.pnl_pct)})</span></div>
+          </div>
+          <div class="suggbox" id="sugg-${r.id}">
+            <span class="verdict ${vcls}">${esc(s.verdict || "—")}</span>
+            ${plain ? `<b>${esc(plain)}</b>` : ""}
+            <span class="popcmp">POP 入场 ${pct(s.pop_entry)} → 现在 ${pct(s.pop_now)}</span>
+            <div class="reason">${esc(s.reason || "")}</div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    function toggleSugg(id) {
+      document.getElementById("sugg-" + id).classList.toggle("open");
+    }
+
+    async function del(id) {
+      if (!confirm("确定移出观察?")) return;
+      await fetch("/api/watch/remove", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      load();
+    }
+
+    document.getElementById("refresh").addEventListener("click", load);
+    load();
+  </script>
+</body>
+</html>

@@ -16,6 +16,8 @@ __pycache__/
 *.log
 # 扫描结果输出快照
 scan.json
+# 个人跟踪的持仓记录,不是公开信息
+positions.json
 # 54MB 大文件,用户各自去官网下
 cloudflared.exe
 

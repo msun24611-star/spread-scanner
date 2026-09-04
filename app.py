@@ -9,6 +9,9 @@ app.py —— 垂直价差机会发现网站 后端
   GET /api/scan                  扫全池,全局排序
   GET /api/scan?ticker=NVDA      只扫单个标的(含不在池里的任意代码)
   可选参数(覆盖默认): min_dte,max_dte,min_ror,min_pop,min_oi,short_delta_min,short_delta_max
+  GET  /api/watch                观察列表:实时重新估值 + 平仓建议
+  POST /api/watch/add            加入观察(body 是 /api/scan 返回的一行 spread)
+  POST /api/watch/remove         移出观察(body: {id})
 内存缓存 TTL 5 分钟,避免重复扫描狂打老虎 API;响应带 asOf 时间戳。
 """
 import hashlib
@@ -30,6 +33,7 @@ except Exception:
 from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
 
 import flow
+import positions
 import screener
 import tiger
 
@@ -272,6 +276,8 @@ def scan():
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False
+    if res.get("error"):
+        return jsonify(res)
     return jsonify(_cache_put(key, res))
 
 
@@ -300,6 +306,8 @@ def flow_scan():
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False
+    if res.get("error"):
+        return jsonify(res)
     return jsonify(_cache_put(key, res))
 
 
@@ -330,6 +338,8 @@ def flow_direction():
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False
+    if res.get("error"):
+        return jsonify(res)
     return jsonify(_cache_put(key, res))
 
 
@@ -357,6 +367,8 @@ def flow_positioning():
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False
+    if res.get("error"):
+        return jsonify(res)
     return jsonify(_cache_put(key, res))
 
 
@@ -386,6 +398,8 @@ def flow_biglots():
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False
+    if res.get("error"):
+        return jsonify(res)
     return jsonify(_cache_put(key, res))
 
 
@@ -412,7 +426,39 @@ def ai_analysis():
     res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
     res["elapsed"] = round(time.time() - t0, 1)
     res["cached"] = False
+    if res.get("error"):
+        return jsonify(res)
     return jsonify(_cache_put(key, res))
+
+
+@app.get("/api/watch")
+def watch_list():
+    """观察列表:每条记录用当前期权报价重新估值,算浮动盈亏 + 平仓建议。
+    不走缓存 —— 观察记录条数少,用户点开就是要看最新数。"""
+    t0 = time.time()
+    res = positions.refresh()
+    res["asOf"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    res["elapsed"] = round(time.time() - t0, 1)
+    return jsonify(res)
+
+
+@app.post("/api/watch/add")
+def watch_add():
+    """把一行 /api/scan 返回的 spread 存进观察列表(去重:同标的/到期/方向/两个行权价视为同一条)。"""
+    spread = request.get_json(silent=True) or {}
+    if not spread.get("symbol"):
+        return jsonify({"error": "缺少 spread 数据"}), 400
+    return jsonify(positions.add(spread))
+
+
+@app.post("/api/watch/remove")
+def watch_remove():
+    body = request.get_json(silent=True) or {}
+    pos_id = body.get("id")
+    if not pos_id:
+        return jsonify({"error": "缺少 id"}), 400
+    ok = positions.remove(pos_id)
+    return jsonify({"removed": ok})
 
 
 # 静态托管
